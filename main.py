@@ -72,24 +72,33 @@ async def back_to_menu(message: Message, state: FSMContext):
     await message.answer("Bosh menyu:", reply_markup=get_main_menu())
 
 @dp.message(BotStates.menu)
+@dp.message(BotStates.menu)
 async def menu_handler(message: Message, state: FSMContext):
-    text = message.text
+    text = message.text.strip() if message.text else ""
     
-    if text == "📥 Media Yuklash":
+    # 1. Smart Link Detection (Auto-switch to Downloader)
+    if "instagram.com" in text or "youtube.com" in text or "youtu.be" in text:
+        await state.set_state(BotStates.downloader)
+        # Call the link handler logic directly
+        await link_handler(message)
+        return
+
+    # 2. Button Handling (Partial matching for robustness)
+    if "Media Yuklash" in text:
         await state.set_state(BotStates.downloader)
         await message.answer(
             "<b>Media Yuklash bo'limi</b> 📥\n\n"
             "YouTube yoki Instagram havolasini yuboring:",
             reply_markup=get_back_button()
         )
-    elif text == "🔄 Hujjat Konverter":
+    elif "Hujjat Konverter" in text:
         await state.set_state(BotStates.converter)
         await message.answer(
             "<b>Hujjat Konverter bo'limi</b> 🔄\n\n"
             "Konvertatsiya qilish uchun fayl (PDF, DOCX, XLSX) yuboring:",
             reply_markup=get_back_button()
         )
-    elif text == "🎵 Musiqa Qidirish (Shazam)":
+    elif "Musiqa Qidirish" in text: # "Shazam" might be in brackets
         await state.set_state(BotStates.music_finder)
         await message.answer(
             "<b>Musiqa Qidirish (Shazam)</b> 🎵\n\n"
@@ -97,7 +106,10 @@ async def menu_handler(message: Message, state: FSMContext):
             reply_markup=get_back_button()
         )
     else:
-        await message.answer("Iltimos, quyidagi tugmalardan birini tanlang:", reply_markup=get_main_menu())
+        await message.answer(
+            "Iltimos, pastdagi tugmalardan birini tanlang yoki to'g'ridan-to'g'ri havola yuboring:", 
+            reply_markup=get_main_menu()
+        )
 
 
 @dp.message(BotStates.converter, F.document)
