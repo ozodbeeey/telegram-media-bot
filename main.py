@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import yt_dlp
 import converters
+import music_recognizer
 
 # Load environment variables
 load_dotenv()
@@ -34,10 +35,12 @@ class BotStates(StatesGroup):
     menu = State()
     downloader = State()
     converter = State()
+    music_finder = State()
 
 def get_main_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📥 Media Yuklash"), KeyboardButton(text="🔄 Hujjat Konverter")]
+        [KeyboardButton(text="📥 Media Yuklash"), KeyboardButton(text="🔄 Hujjat Konverter")],
+        [KeyboardButton(text="🎵 Musiqa Qidirish (Shazam)")]
     ], resize_keyboard=True)
 
 def get_back_button():
@@ -84,6 +87,13 @@ async def menu_handler(message: Message, state: FSMContext):
         await message.answer(
             "<b>Hujjat Konverter bo'limi</b> 🔄\n\n"
             "Konvertatsiya qilish uchun fayl (PDF, DOCX, XLSX) yuboring:",
+            reply_markup=get_back_button()
+        )
+    elif text == "🎵 Musiqa Qidirish (Shazam)":
+        await state.set_state(BotStates.music_finder)
+        await message.answer(
+            "<b>Musiqa Qidirish (Shazam)</b> 🎵\n\n"
+            "Musiqani topish uchun <b>Video</b>, <b>Audio</b> yoki <b>Ovozli xabar</b> yuboring:",
             reply_markup=get_back_button()
         )
     else:
@@ -199,6 +209,60 @@ async def downloader_wrong_input(message: Message):
 @dp.message(BotStates.converter)
 async def converter_wrong_input(message: Message):
     await message.answer("Iltimos, fayl (PDF, DOCX, XLSX) yuboring.")
+
+@dp.message(BotStates.music_finder, F.content_type.in_({'video', 'audio', 'voice', 'video_note'}))
+async def music_finder_handler(message: Message):
+    await message.answer("⏳ <b>Eshitmoqdaman...</b> (Bu biroz vaqt olishi mumkin)")
+    
+    file_id = None
+    if message.video: file_id = message.video.file_id
+    elif message.audio: file_id = message.audio.file_id
+    elif message.voice: file_id = message.voice.file_id
+    elif message.video_note: file_id = message.video_note.file_id
+    
+    if not file_id:
+        await message.answer("❌ Faylni o'qib bo'lmadi.")
+        return
+
+    # Temporary file path
+    temp_path = f"{DOWNLOAD_DIR}/temp_{file_id}"
+    
+    try:
+        # 1. Download snippet
+        file = await bot.get_file(file_id)
+        # Determine extension from file_path or default
+        ext = os.path.splitext(file.file_path)[1]
+        temp_path += ext
+        await bot.download_file(file.file_path, temp_path)
+        
+        # 2. Recognize
+        result = await music_recognizer.recognize_audio(temp_path)
+        
+        # Cleanup temp file immediately
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        if result:
+            await message.answer(
+                f"🔎 <b>Topildi:</b> {result['artist']} - {result['title']}\n"
+                "⬇️ <i>To'liq versiyasini yuklayapman...</i>"
+            )
+            # 3. Download Full MP3 via YouTube Search
+            search_query = f"ytsearch1:{result['full_name']} audio"
+            # Re-use audio download logic logic but customized for search
+            await download_and_send_audio(message, search_query)
+        else:
+            await message.answer("❌ Afsuski, bu musiqani taniy olmadim.")
+            
+    except Exception as e:
+        logging.error(f"Music Finder Error: {e}")
+        await message.answer(f"❌ Xatolik yuz berdi: {e}")
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+@dp.message(BotStates.music_finder)
+async def music_finder_wrong_input(message: Message):
+    await message.answer("Musiqa topish uchun Video, Audio yoki Ovozli xabar yuboring.")
 
 @dp.callback_query(F.data.startswith("type_"))
 async def callbacks_num(callback: CallbackQuery):
