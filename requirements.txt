@@ -1,0 +1,8 @@
+aiogram==3.17.0
+yt-dlp
+python-dotenv
+pdf2docx
+python-docx
+openpyxl
+python-pptx
+pymupdf
