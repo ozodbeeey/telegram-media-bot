@@ -93,7 +93,7 @@ async def menu_handler(message: Message, state: FSMContext):
         await state.set_state(BotStates.music_finder)
         await message.answer(
             "<b>Musiqa Qidirish (Shazam)</b> 🎵\n\n"
-            "Musiqani topish uchun <b>Video</b>, <b>Audio</b> yoki <b>Ovozli xabar</b> yuboring:",
+            "Musiqani topish uchun <b>Nomini yozing</b>, yoki <b>Video/Audio</b> yuboring:",
             reply_markup=get_back_button()
         )
     else:
@@ -260,9 +260,18 @@ async def music_finder_handler(message: Message):
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
+@dp.message(BotStates.music_finder, F.text)
+async def music_finder_text_handler(message: Message):
+    query = message.text
+    await message.answer(f"🔎 <b>Qidirilmoqda:</b> {query}\n⬇️ <i>Topib, yuklayapman...</i>")
+    
+    # Search and download via YouTube
+    search_query = f"ytsearch1:{query} audio"
+    await download_and_send_audio(message, search_query)
+
 @dp.message(BotStates.music_finder)
 async def music_finder_wrong_input(message: Message):
-    await message.answer("Musiqa topish uchun Video, Audio yoki Ovozli xabar yuboring.")
+    await message.answer("Musiqa topish uchun <b>Nomini yozing</b> yoki <b>Video/Audio/Ovozli xabar</b> yuboring.")
 
 @dp.callback_query(F.data.startswith("type_"))
 async def callbacks_num(callback: CallbackQuery):
