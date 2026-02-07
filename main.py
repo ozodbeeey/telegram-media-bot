@@ -14,10 +14,16 @@ from aiogram.fsm.state import State, StatesGroup
 import yt_dlp
 import converters
 import music_recognizer
+import ffmpeg_utils
+import homework
+import presentation
+import ai_tools
 
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    sys.exit("Error: BOT_TOKEN topilmadi! .env faylini tekshiring.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -36,11 +42,19 @@ class BotStates(StatesGroup):
     downloader = State()
     converter = State()
     music_finder = State()
+    editor = State()
+    homework = State()
+    presentation = State()
+    ai_chat = State()
+    tts = State()
+    translator = State()
 
 def get_main_menu():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📥 Media Yuklash"), KeyboardButton(text="🔄 Hujjat Konverter")],
-        [KeyboardButton(text="🎵 Musiqa Qidirish (Shazam)")]
+        [KeyboardButton(text="📥 Media Yuklash"), KeyboardButton(text="🎬 Video Tahrirlash")],
+        [KeyboardButton(text="🎵 Musiqa Qidirish (Shazam)"), KeyboardButton(text="🎓 Studentlar uchun")],
+        [KeyboardButton(text="📝 Mustaqil ish"), KeyboardButton(text="🖥 Prezentatsiya")],
+        [KeyboardButton(text="🤖 AI Yordamchi"), KeyboardButton(text="🗣 Matn -> Ovoz"), KeyboardButton(text="🌍 Tarjimon")]
     ], resize_keyboard=True)
 
 def get_back_button():
@@ -91,18 +105,63 @@ async def menu_handler(message: Message, state: FSMContext):
             "YouTube yoki Instagram havolasini yuboring:",
             reply_markup=get_back_button()
         )
-    elif "Hujjat Konverter" in text:
-        await state.set_state(BotStates.converter)
-        await message.answer(
-            "<b>Hujjat Konverter bo'limi</b> 🔄\n\n"
-            "Konvertatsiya qilish uchun fayl (PDF, DOCX, XLSX) yuboring:",
-            reply_markup=get_back_button()
-        )
     elif "Musiqa Qidirish" in text: # "Shazam" might be in brackets
         await state.set_state(BotStates.music_finder)
         await message.answer(
             "<b>Musiqa Qidirish (Shazam)</b> 🎵\n\n"
             "Musiqani topish uchun <b>Nomini yozing</b>, yoki <b>Video/Audio</b> yuboring:",
+            reply_markup=get_back_button()
+        )
+    elif "Video Tahrirlash" in text:
+        await state.set_state(BotStates.editor)
+        await message.answer(
+            "<b>Video Tahrirlash</b> 🎬\n\n"
+            "Tahrirlash uchun <b>Video yuboring</b>:",
+            reply_markup=get_back_button()
+        )
+    elif "Studentlar uchun" in text:
+        await state.set_state(BotStates.converter)
+        await message.answer(
+            "<b>🎓 Studentlar uchun (Converter)</b>\n\n"
+            "Quyidagi formatdagi fayllarni yuboring:\n"
+            "📄 <b>PDF, Word (DOCX), Excel (XLSX), PowerPoint (PPTX)</b>\n\n"
+            "Men ularni bir formatdan boshqasiga o'tkazib beraman.",
+            reply_markup=get_back_button()
+        )
+    elif "Mustaqil ish" in text:
+        await state.set_state(BotStates.homework)
+        await message.answer(
+            "<b>📝 Mustaqil ish (Referat) kerakmi?</b>\n\n"
+            "Mavzuni yozing (masalan: <i>Amir Temur, Iqtisodiyot, Python</i>):",
+            reply_markup=get_back_button()
+        )
+    elif "Prezentatsiya" in text:
+        await state.set_state(BotStates.presentation)
+        await message.answer(
+            "<b>🖥 Prezentatsiya (Slayd) yaratish</b>\n\n"
+            "Mavzuni yozing (masalan: <i>Amir Temur, Marketing, Fizika</i>):",
+            reply_markup=get_back_button()
+        )
+    elif "AI Yordamchi" in text:
+        await state.set_state(BotStates.ai_chat)
+        await message.answer(
+            "<b>🤖 AI Yordamchi (ChatGPT)</b>\n\n"
+            "Savolingizni yozing, men javob beraman:",
+            reply_markup=get_back_button()
+        )
+    elif "Matn -> Ovoz" in text:
+        await state.set_state(BotStates.tts)
+        await message.answer(
+            "<b>🗣 Matnni Ovozga aylantirish</b>\n\n"
+            "Matnni yozing, men uni o'qib beraman (MP3):",
+            reply_markup=get_back_button()
+        )
+    elif "Tarjimon" in text:
+        await state.set_state(BotStates.translator)
+        await message.answer(
+            "<b>🌍 Tarjimon (Google)</b>\n\n"
+            "So'z yoki matn yozing, men uni <b>O'zbekchaga</b> tarjima qilaman.\n"
+            "<i>(Boshqa tilga o'girish uchun, masalan: 'en hello' deb yozing)</i>",
             reply_markup=get_back_button()
         )
     else:
@@ -224,7 +283,7 @@ async def converter_wrong_input(message: Message):
 
 @dp.message(BotStates.music_finder, F.content_type.in_({'video', 'audio', 'voice', 'video_note'}))
 async def music_finder_handler(message: Message):
-    await message.answer("⏳ <b>Eshitmoqdaman...</b> (Bu biroz vaqt olishi mumkin)")
+    status_msg = await message.answer("⏳ <b>Eshitmoqdaman...</b> (Bu biroz vaqt olishi mumkin)")
     
     file_id = None
     if message.video: file_id = message.video.file_id
@@ -233,7 +292,7 @@ async def music_finder_handler(message: Message):
     elif message.video_note: file_id = message.video_note.file_id
     
     if not file_id:
-        await message.answer("❌ Faylni o'qib bo'lmadi.")
+        await status_msg.edit_text("❌ Faylni o'qib bo'lmadi.")
         return
 
     # Temporary file path
@@ -255,6 +314,7 @@ async def music_finder_handler(message: Message):
             os.remove(temp_path)
             
         if result:
+            await status_msg.delete() # Clean up status
             await message.answer(
                 f"🔎 <b>Topildi:</b> {result['artist']} - {result['title']}\n"
                 "⬇️ <i>To'liq versiyasini yuklayapman...</i>"
@@ -264,26 +324,302 @@ async def music_finder_handler(message: Message):
             # Re-use audio download logic logic but customized for search
             await download_and_send_audio(message, search_query)
         else:
-            await message.answer("❌ Afsuski, bu musiqani taniy olmadim.")
+            await status_msg.edit_text("❌ Afsuski, bu musiqani taniy olmadim.")
             
     except Exception as e:
         logging.error(f"Music Finder Error: {e}")
-        await message.answer(f"❌ Xatolik yuz berdi: {e}")
+        await status_msg.edit_text(f"❌ Xatolik yuz berdi: {e}")
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 @dp.message(BotStates.music_finder, F.text)
 async def music_finder_text_handler(message: Message):
     query = message.text
-    await message.answer(f"🔎 <b>Qidirilmoqda:</b> {query}\n⬇️ <i>Topib, yuklayapman...</i>")
+    status_msg = await message.answer(f"🔎 <b>Qidirilmoqda:</b> {query}...")
     
-    # Search and download via YouTube
-    search_query = f"ytsearch1:{query} audio"
-    await download_and_send_audio(message, search_query)
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'extract_flat': True, # Only metadata
+        'quiet': True,
+    }
+    
+    # Check for cookies (reuse logic if needed, but for search flat_playlist usually works without)
+    if os.path.exists('cookies.txt'):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+
+    search_query = f"ytsearch5:{query}"
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(search_query, download=False)
+            
+        if 'entries' not in info or not info['entries']:
+            await status_msg.edit_text("❌ Hech narsa topilmadi.")
+            return
+            
+        entries = info['entries']
+        response_text = "<b>🎵 Topilgan musiqalar:</b>\n\n"
+        buttons = []
+        
+        for i, entry in enumerate(entries):
+            title = entry.get('title', 'Noma\'lum')
+            vid_id = entry.get('id')
+            response_text += f"<b>{i+1}.</b> {title}\n"
+            # Button for each song
+            buttons.append([InlineKeyboardButton(text=f"{i+1} ⬇️", callback_data=f"dl_song_{vid_id}")])
+            
+        buttons.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")])
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await status_msg.edit_text(response_text, reply_markup=markup)
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Qidiruvda xatolik: {e}")
+
+@dp.callback_query(F.data.startswith("dl_song_"))
+async def callbacks_download_song(callback: CallbackQuery):
+    vid_id = callback.data.split("_")[2]
+    url = f"https://www.youtube.com/watch?v={vid_id}"
+    
+    await callback.message.edit_text(f"⏳ <b>Yuklanmoqda...</b>\n<i>(ID: {vid_id})</i>")
+    
+    # Reuse the robust download function where we send 'url'
+    # Note: callback.message is the bot's message. 
+    # download_and_send_audio usually expects a user message to obtain chat_id.
+    # But callback.message has chat.id too.
+    await download_and_send_audio(callback.message, url)
+
+@dp.callback_query(F.data == "cancel_search")
+async def callbacks_cancel_search(callback: CallbackQuery):
+    await callback.message.delete()
+    await callback.answer("Bekor qilindi")
 
 @dp.message(BotStates.music_finder)
 async def music_finder_wrong_input(message: Message):
     await message.answer("Musiqa topish uchun <b>Nomini yozing</b> yoki <b>Video/Audio/Ovozli xabar</b> yuboring.")
+
+# ----------------- VIDEO EDITOR HANDLERS -----------------
+
+def get_editor_keyboard(video_id):
+    # Using video_id in callback data to track sessions if needed, 
+    # but simplest is to reply to the bot's message which has the video.
+    # We will assume the user interacts with the message we send back.
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            # InlineKeyboardButton(text="✂️ Kesish", callback_data="edit_trim"), # Complex, maybe later
+            InlineKeyboardButton(text="📉 Kichraytirish", callback_data="edit_compress")
+        ],
+        [
+            InlineKeyboardButton(text="⏩ Tezlashtirish (1.5x)", callback_data="edit_fast"),
+            InlineKeyboardButton(text="🐌 Sekinlashtirish (0.5x)", callback_data="edit_slow")
+        ],
+        [
+            InlineKeyboardButton(text="🔭 Telescope", callback_data="edit_note"),
+            InlineKeyboardButton(text="🎵 MP3 qilish", callback_data="edit_mp3")
+        ],
+        [
+            InlineKeyboardButton(text="🎙 Ovozli xabar", callback_data="edit_voice"),
+            InlineKeyboardButton(text="🎼 Musiqani topish", callback_data="edit_find_music")
+        ]
+    ])
+
+@dp.message(BotStates.editor, F.video)
+async def editor_video_handler(message: Message, state: FSMContext):
+    video = message.video
+    # Ask what to do
+    await message.reply(
+        "Tahrirlash uchun quyidagi tugmalardan birini tanlang:",
+        reply_markup=get_editor_keyboard(video.file_id)
+    )
+
+@dp.message(BotStates.editor)
+async def editor_wrong_input(message: Message):
+    await message.answer("Iltimos, tahrirlash uchun <b>Video</b> yuboring.")
+
+@dp.callback_query(F.data.startswith("edit_"))
+async def callbacks_editor(callback: CallbackQuery):
+    action = callback.data
+    
+    # The message the user replied to (the video) is actually... wait.
+    # The user sent a video. Bot replied with "Choose option". 
+    # User clicks button on Bot's message.
+    # So callback.message is the Bot's message.
+    # callback.message.reply_to_message is the User's Video message.
+    
+    if not callback.message.reply_to_message or not callback.message.reply_to_message.video:
+        await callback.answer("Video topilmadi. Qaytadan yuboring.", show_alert=True)
+        return
+
+    video = callback.message.reply_to_message.video
+    file_id = video.file_id
+    
+    status_msg = await callback.message.edit_text("⏳ <b>Jarayon ketmoqda...</b>")
+    
+    input_path = f"{DOWNLOAD_DIR}/edit_in_{file_id}.mp4"
+    output_path = ""
+    output_type = "document" # document, audio, voice, video, video_note
+    
+    try:
+        # Download
+        file = await bot.get_file(file_id)
+        await bot.download_file(file.file_path, input_path)
+        
+        caption = "(📥@instgramyoutubedowbot orqali istagan musiqangizni tez va oson toping!)"
+        
+        if action == "edit_mp3":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.mp3"
+            await ffmpeg_utils.video_to_mp3(input_path, output_path)
+            output_type = "audio"
+            
+        elif action == "edit_voice":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.ogg"
+            await ffmpeg_utils.video_to_voice(input_path, output_path)
+            output_type = "voice"
+            
+        elif action == "edit_compress":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.mp4"
+            await ffmpeg_utils.compress_video(input_path, output_path)
+            output_type = "video"
+            
+        elif action == "edit_fast":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.mp4"
+            await ffmpeg_utils.change_speed(input_path, output_path, 1.5)
+            output_type = "video"
+            
+        elif action == "edit_slow":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.mp4"
+            await ffmpeg_utils.change_speed(input_path, output_path, 0.5)
+            output_type = "video"
+            
+        elif action == "edit_note":
+            output_path = f"{DOWNLOAD_DIR}/edit_out_{file_id}.mp4"
+            await ffmpeg_utils.video_to_note(input_path, output_path)
+            output_type = "video_note"
+            
+        elif action == "edit_find_music":
+            # Extract audio first for better recognition
+            temp_audio_path = f"{DOWNLOAD_DIR}/temp_recog_{file_id}.mp3"
+            await ffmpeg_utils.video_to_mp3(input_path, temp_audio_path)
+            
+            result = await music_recognizer.recognize_audio(temp_audio_path)
+            
+            # Cleanup temp audio
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+                
+            if result:
+                 await callback.message.answer(
+                    f"🔎 <b>Topildi:</b> {result['artist']} - {result['title']}\n"
+                    "⬇️ <i>To'liq versiyasini yuklayapman...</i>"
+                )
+                 search_query = f"ytsearch1:{result['full_name']} audio"
+                 await download_and_send_audio(callback.message, search_query)
+                 await status_msg.delete()
+                 os.remove(input_path)
+                 return
+            else:
+                 await status_msg.edit_text("❌ Afsuski, musiqani taniy olmadim.")
+                 os.remove(input_path)
+                 return
+        
+        # Send Result
+        if os.path.exists(output_path):
+            result_file = FSInputFile(output_path)
+            if output_type == "audio":
+                await callback.message.answer_audio(audio=result_file, caption=caption)
+            elif output_type == "voice":
+                await callback.message.answer_voice(voice=result_file, caption=caption) 
+            elif output_type == "video_note":
+                await callback.message.answer_video_note(video_note=result_file)
+            else:
+                await callback.message.answer_video(video=result_file, caption=caption)
+            
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text("❌ Xatolik: Natija fayli hosil bo'lmadi.")
+            
+    except Exception as e:
+        logging.error(f"Editor Error: {e}")
+        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        
+    finally:
+        # Cleanup both input and output files
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        if output_path and os.path.exists(output_path):
+            os.remove(output_path)
+
+# ----------------- HOMEWORK HANDLER -----------------
+
+@dp.message(BotStates.homework, F.text)
+async def homework_handler(message: Message, state: FSMContext):
+    topic = message.text
+    status_msg = await message.answer(f"🔎 <b>{topic}</b> haqida ma'lumot qidiryapman...\n<i>(Wikipediadan olib Word fayl yasayman)</i>")
+    
+    # Safe filename
+    safe_topic = "".join([c for c in topic if c.isalnum() or c in (' ', '_', '-')]).strip()
+    output_path = f"{DOWNLOAD_DIR}/{safe_topic}.docx"
+    
+    try:
+        # Run sync function in thread to not block event loop
+        loop = asyncio.get_event_loop()
+        success, msg = await loop.run_in_executor(None, homework.generate_homework, topic, output_path)
+        
+        if success:
+            doc_file = FSInputFile(output_path)
+            await message.bot.send_document(
+                chat_id=message.chat.id,
+                document=doc_file,
+                caption=f"📝 <b>Mustaqil ish tayyor!</b>\n\nMavzu: {topic}\nManba: Wikipedia"
+            )
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text(f"❌ {msg}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        
+    finally:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+# ----------------- PRESENTATION HANDLER -----------------
+
+@dp.message(BotStates.presentation, F.text)
+async def presentation_handler(message: Message, state: FSMContext):
+    topic = message.text
+    status_msg = await message.answer(f"⏳ <b>{topic}</b> bo'yicha slayd tayyorlanmoqda...\n<i>(Biroz vaqt olishi mumkin)</i>")
+    
+    safe_topic = "".join([c for c in topic if c.isalnum() or c in (' ', '_', '-')]).strip()
+    output_path = f"{DOWNLOAD_DIR}/{safe_topic}.pptx"
+    
+    try:
+        loop = asyncio.get_event_loop()
+        success, msg = await loop.run_in_executor(None, presentation.generate_presentation, topic, output_path)
+        
+        if success:
+            ppt_file = FSInputFile(output_path)
+            await message.bot.send_document(
+                chat_id=message.chat.id,
+                document=ppt_file,
+                caption=(
+                    f"🖥 <b>Slayd tayyor!</b>\n\nMavzu: {topic}\n\n"
+                    "💡 <i>Eslatma: Faylni Powerpointda ochib, o'zingizga moslab (dizaynini o'zgartirib) olaverasiz.</i>"
+                )
+            )
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text(f"❌ {msg}")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        
+    finally:
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+# ---------------------------------------------------------
 
 @dp.callback_query(F.data.startswith("type_"))
 async def callbacks_num(callback: CallbackQuery):
@@ -311,6 +647,82 @@ async def callbacks_num(callback: CallbackQuery):
         logging.error(f"Error: {e}")
         await callback.message.edit_text(f"❌ Xatolik yuz berdi: {str(e)}")
 
+@dp.callback_query(F.data == "check_music")
+async def callbacks_check_music(callback: CallbackQuery):
+    if not callback.message.video:
+        await callback.answer("Video topilmadi.", show_alert=True)
+        return
+
+    video = callback.message.video
+    file_id = video.file_id
+    
+    status_msg = await callback.message.reply("⏳ <b>Musiqa qidirilmoqda...</b>")
+    
+    input_path = f"{DOWNLOAD_DIR}/check_music_{file_id}.mp4"
+    temp_audio_path = f"{DOWNLOAD_DIR}/check_music_{file_id}.mp3"
+    
+    try:
+        # Download video
+        file = await bot.get_file(file_id)
+        await bot.download_file(file.file_path, input_path)
+        
+        # Extract audio using existing util
+        await ffmpeg_utils.video_to_mp3(input_path, temp_audio_path)
+        
+        # Recognize
+        result = await music_recognizer.recognize_audio(temp_audio_path)
+        
+        if result:
+            await status_msg.delete()
+            
+            # Interactive Search Logic (Copied/Adapted from music_finder_text_handler)
+            search_query = f"ytsearch5:{result['full_name']} audio"
+            
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'noplaylist': True,
+                'extract_flat': True,
+                'quiet': True,
+            }
+             # Check for cookies
+            if os.path.exists('cookies.txt'):
+                ydl_opts['cookiefile'] = 'cookies.txt'
+                
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(search_query, download=False)
+                
+            if 'entries' not in info or not info['entries']:
+                await callback.message.answer(f"🔎 <b>Topildi:</b> {result['artist']} - {result['title']}\n❌ Lekin YouTube-dan topib bo'lmadi.")
+                return
+
+            entries = info['entries']
+            response_text = f"🔎 <b>Shazam orqali topildi:</b> {result['artist']} - {result['title']}\n\n<b>🎵 YouTube natijalari:</b>\n\n"
+            buttons = []
+            
+            for i, entry in enumerate(entries):
+                title = entry.get('title', 'Noma\'lum')
+                vid_id = entry.get('id')
+                response_text += f"<b>{i+1}.</b> {title}\n"
+                buttons.append([InlineKeyboardButton(text=f"{i+1} ⬇️", callback_data=f"dl_song_{vid_id}")])
+                
+            buttons.append([InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_search")])
+            markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+            
+            await callback.message.answer(response_text, reply_markup=markup)
+
+        else:
+            await status_msg.edit_text("❌ Afsuski, bu videodagi musiqani taniy olmadim.")
+            
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Xatolik: {e}")
+        logging.error(f"Check Music Error: {e}")
+        
+    finally:
+        # Cleanup
+        if os.path.exists(input_path): os.remove(input_path)
+        if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
+
+
 async def download_and_send_video(message: Message, url: str):
     ydl_opts = {
         'format': 'best[ext=mp4]/best', # Best mp4 video
@@ -322,8 +734,6 @@ async def download_and_send_video(message: Message, url: str):
     # Check for cookies.txt (Server/Local fallback)
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
-    else:
-        ydl_opts['cookiesfrombrowser'] = ('chrome',) 
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -332,11 +742,23 @@ async def download_and_send_video(message: Message, url: str):
             
             # Send file
             video_file = FSInputFile(filename)
+            
+            # Button to check music
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎼 Musiqani topish", callback_data="check_music")]
+            ])
+            
             await message.bot.send_video(
                 chat_id=message.chat.id,
                 video=video_file,
-                caption=f"🎬 <b>{info.get('title', 'Video')}</b>\n\n@SizningBotingiz"
+                caption=f"🎬 <b>{info.get('title', 'Video')}</b>\n\n(📥@instgramyoutubedowbot orqali istagan musiqangizni tez va oson toping!)",
+                reply_markup=kb
             )
+            
+            # Delete Status Message if it comes from the bot (e.g. "Yuklanmoqda...")
+            if message.from_user.is_bot:
+                try: await message.delete()
+                except: pass
             
             # Cleanup
             os.remove(filename)
@@ -362,12 +784,16 @@ async def download_and_send_audio(message: Message, url: str):
     # Check for cookies.txt (Server/Local fallback)
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
-    else:
-        ydl_opts['cookiesfrombrowser'] = ('chrome',)
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
+            
+            # 1. Handle "Search Results" (Playlist)
+            if 'entries' in info:
+                # Take the first item if it's a search result
+                info = info['entries'][0]
+
             # Filename might change due to postprocessing (.mp3)
             # Prepare filename returns the *original* ext usually? 
             # Safest is to find the file or trust prepare_filename then change ext
@@ -385,14 +811,87 @@ async def download_and_send_audio(message: Message, url: str):
             await message.bot.send_audio(
                 chat_id=message.chat.id,
                 audio=audio_file,
-                caption=f"🎵 <b>{info.get('title', 'Audio')}</b>\n\n@SizningBotingiz"
+                caption=f"🎵 <b>{info.get('title', 'Audio')}</b>\n\n(📥@instgramyoutubedowbot orqali istagan musiqangizni tez va oson toping!)"
             )
+            
+            # Delete Status Message if it comes from the bot (e.g. "Yuklanmoqda...")
+            if message.from_user.is_bot:
+                try: await message.delete()
+                except: pass
             
             os.remove(filename)
     except Exception as e:
         await message.edit_text(f"❌ Audio yuklashda xatolik: {e}")
 
+# ----------------- AI HANDLERS -----------------
+
+@dp.message(BotStates.ai_chat, F.text)
+async def ai_chat_handler(message: Message, state: FSMContext):
+    user_text = message.text
+    status_msg = await message.answer("🤖 <b>O'ylayapman...</b>")
+    
+    response = await ai_tools.ask_ai(user_text)
+    
+    # Check length (Telegram limit 4096)
+    if len(response) > 4000:
+        for x in range(0, len(response), 4000):
+            await message.bot.send_message(message.chat.id, response[x:x+4000])
+    else:
+        await message.answer(response, parse_mode="Markdown") # AI uses markdown usually
+        
+    await status_msg.delete()
+
+@dp.message(BotStates.tts, F.text)
+async def tts_handler(message: Message, state: FSMContext):
+    text = message.text
+    logging.info(f"TTS Request: {text}")
+    status_msg = await message.answer("🗣 <b>Ovoz yozilmoqda...</b>")
+    
+    output_path = f"{DOWNLOAD_DIR}/tts_{message.from_user.id}.mp3"
+    
+    try:
+        success, result = await ai_tools.text_to_speech(text, lang='uz', output_path=output_path)
+        
+        if success and os.path.exists(output_path):
+            voice_file = FSInputFile(output_path)
+            await message.answer_audio(voice_file, caption=f"🗣 <b>Matn:</b> {text[:50]}...")
+            await status_msg.delete()
+        else:
+            await status_msg.edit_text(f"❌ Ovoz yozishda xatolik: {result}")
+            
+    except Exception as e:
+        logging.error(f"TTS Handler Error: {e}")
+        await status_msg.edit_text(f"❌ Tizim xatoligi: {e}")
+        
+    finally:
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+
+@dp.message(BotStates.translator, F.text)
+async def translator_handler(message: Message, state: FSMContext):
+    text = message.text
+    
+    # Simple logic: Detect if user explicitly wants EN/RU
+    target = 'uz'
+    content = text
+    
+    if text.lower().startswith('en '):
+        target = 'en'
+        content = text[3:]
+    elif text.lower().startswith('ru '):
+        target = 'ru'
+        content = text[3:]
+        
+    translation = await ai_tools.translate_text(content, target_lang=target)
+    
+    await message.answer(
+        f"🌍 <b>Tarjima ({target.upper()}):</b>\n\n"
+        f"<code>{translation}</code>"
+    )
+
 async def main():
+    print("Bot ishga tushmoqda...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

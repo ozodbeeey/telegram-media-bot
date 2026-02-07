@@ -7,3 +7,9 @@ openpyxl
 python-pptx
 pymupdf
 shazamio
+comtypes
+docx2pdf
+wikipedia
+g4f
+gTTS
+deep-translator
